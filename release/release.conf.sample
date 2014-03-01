@@ -55,3 +55,7 @@ PORTBRANCH="ports/head@rHEAD"
 ## build chroot environment.
 #EMBEDDED_WORLD_FLAGS=""
 
+## Set to skip the chroot environment buildworld/installworld/distribution
+## step if it is expected the build environment will exist via alternate
+## means.
+#CHROOTBUILD_SKIP=

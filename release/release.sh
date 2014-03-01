@@ -190,12 +190,14 @@ if [ "x${NOPORTS}" = "x" ]; then
 	${VCSCMD} ${PORTBRANCH} ${CHROOTDIR}/usr/ports
 fi
 
-cd ${CHROOTDIR}/usr/src
-env ${CHROOT_MAKEENV} make ${CHROOT_WMAKEFLAGS} buildworld
-env ${CHROOT_MAKEENV} make ${CHROOT_IMAKEFLAGS} installworld \
-	DESTDIR=${CHROOTDIR}
-env ${CHROOT_MAKEENV} make ${CHROOT_DMAKEFLAGS} distribution \
-	DESTDIR=${CHROOTDIR}
+if [ -z ${CHROOTBUILD_SKIP} ]; then
+	cd ${CHROOTDIR}/usr/src
+	env ${CHROOT_MAKEENV} make ${CHROOT_WMAKEFLAGS} buildworld
+	env ${CHROOT_MAKEENV} make ${CHROOT_IMAKEFLAGS} installworld \
+		DESTDIR=${CHROOTDIR}
+	env ${CHROOT_MAKEENV} make ${CHROOT_DMAKEFLAGS} distribution \
+		DESTDIR=${CHROOTDIR}
+fi
 mount -t devfs devfs ${CHROOTDIR}/dev
 cp /etc/resolv.conf ${CHROOTDIR}/etc/resolv.conf
 trap "umount ${CHROOTDIR}/dev" EXIT # Clean up devfs mount on exit
