@@ -147,6 +147,13 @@ else
 	ARCH_FLAGS=
 fi
 CHROOT_MAKEENV="MAKEOBJDIRPREFIX=${CHROOTDIR}/tmp/obj"
+if [ ! -z ${TARGET} ] && [ ! -z ${TARGET_ARCH} ] && \
+	[ ${TARGET} = "i386" ] && \
+	[ ${TARGET_ARCH} = "i386" ] && \
+	[ "$(sysctl -n hw.machine)" = "amd64" ] && \
+	[ "$(sysctl -n hw.machine_arch)" = "amd64" ]; then
+		CHROOT_MAKEENV="${CHROOT_MAKEENV} TARGET=i386 TARGET_ARCH=i386"
+fi
 CHROOT_WMAKEFLAGS="${MAKE_FLAGS} ${WORLD_FLAGS} ${CONF_FILES}"
 CHROOT_IMAKEFLAGS="${CONF_FILES}"
 CHROOT_DMAKEFLAGS="${CONF_FILES}"
