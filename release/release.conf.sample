@@ -51,10 +51,6 @@ PORTBRANCH="ports/head@rHEAD"
 ## Set when building embedded images.
 #EMBEDDEDBUILD=
 
-## Set to specify userland-specific make(1) flags that affect the
-## build chroot environment.
-#EMBEDDED_WORLD_FLAGS=""
-
 ## Set to skip the chroot environment buildworld/installworld/distribution
 ## step if it is expected the build environment will exist via alternate
 ## means.
