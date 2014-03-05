@@ -271,6 +271,7 @@ get_load_device(int *type, int *unit, int *slice, int *partition)
 		*type = -1;
 		*unit = -1;
 		*slice = 0;
+		return;
 	}
 
 	p++;
