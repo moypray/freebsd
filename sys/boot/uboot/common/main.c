@@ -181,8 +181,8 @@ get_load_device(int *type, int *unit, int *slice, int *partition)
 	const char *p;
 	char *endp;
 
-	devstr = ub_env_get("kernelfrom");
-	printf("kernelfrom=%s\n", devstr);
+	devstr = ub_env_get("loaderdev");
+	printf("loaderdev=%s\n", devstr);
 
 	p = get_device_type(devstr, type);
 
