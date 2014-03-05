@@ -40,6 +40,19 @@ struct uboot_devdesc currdev;
 struct arch_switch archsw;		/* MI/MD interface boundary */
 int devs_no;
 
+struct device_type { 
+	const char *name;
+	int type;
+} device_types[] = {
+	{ "disk", DEV_TYP_STOR },
+	{ "ide",  DEV_TYP_STOR | DT_STOR_IDE },
+	{ "mmc",  DEV_TYP_STOR | DT_STOR_MMC },
+	{ "sata", DEV_TYP_STOR | DT_STOR_SATA },
+	{ "scsi", DEV_TYP_STOR | DT_STOR_SCSI },
+	{ "usb",  DEV_TYP_STOR | DT_STOR_USB },
+	{ "net",  DEV_TYP_NET }
+};
+
 extern char end[];
 extern char bootprog_name[];
 extern char bootprog_rev[];
@@ -116,11 +129,184 @@ meminfo(void)
 	}
 }
 
+static const char *
+get_device_type(const char *devstr, int *devtype)
+{
+	int i;
+	int namelen;
+	struct device_type *dt;
+
+	if (devstr) {
+		for (i = 0; i < sizeof(device_types)/sizeof(device_types[0]); i++) {
+			dt = &device_types[i];
+			namelen = strlen(dt->name);
+			if (0 == strncmp(dt->name, devstr, namelen)) {
+				*devtype = dt->type;
+				return (devstr + namelen);
+			}
+		}
+	}
+
+	*devtype = -1;
+	return (NULL);
+}
+
+
+/*
+ * Parse a device string into type, unit, slice and partition numbers. A
+ * returned value of -1 for type indicates a search should be done for the
+ * first loadable device, otherwise a returned value of -1 for unit
+ * indicates a search should be done for the first loadable device of the
+ * given type.
+ *
+ * The returned values for slice and partition are interpreted by
+ * disk_open().
+ *
+ * Valid device strings:                     For device types:
+ *
+ * <type_name>                               DEV_TYP_STOR, DEV_TYP_NET
+ * <type_name><unit>                         DEV_TYP_STOR, DEV_TYP_NET
+ * <type_name><unit>:                        DEV_TYP_STOR, DEV_TYP_NET
+ * <type_name><unit>:<slice>                 DEV_TYP_STOR
+ * <type_name><unit>:<slice>.                DEV_TYP_STOR
+ * <type_name><unit>:<slice>.<partition>     DEV_TYP_STOR
+ *
+ * For valid type names, see the device_types array, above.
+ *
+ */
+static void
+get_load_device(int *type, int *unit, int *slice, int *partition)
+{
+	char *devstr;
+	const char *p;
+	char *endp;
+
+	devstr = ub_env_get("kernelfrom");
+	printf("kernelfrom=%s\n", devstr);
+
+	p = get_device_type(devstr, type);
+
+	*unit = -1;
+	*slice = 0;
+	*partition = -1;
+
+	/*
+	 * Empty device string, or
+	 * unknown device name, or 
+	 * a bare, known device name
+	 */
+	if ((-1 == *type) || ('\0' == *p)) {
+		return;
+	}
+
+	/*
+	 * Malformed unit number
+	 */
+	if (!isdigit(*p)) {
+		*type = -1;
+		return;
+	}
+
+	/* guaranteed to extract a number from the string, as *p is a digit */
+	*unit = strtol(p, &endp, 10);
+	p = endp;
+
+	/*
+	 * Known device name with unit number and nothing else
+	 */
+	if ('\0' == *p) {
+		return;
+	}
+
+	/*
+	 * Device string is malformed beyond unit number
+	 */
+	if (':' != *p) {
+		*type = -1;
+		*unit = -1;
+		return;
+	}
+
+	p++;
+
+	/*
+	 * No slice and partition specification
+	 */
+	if ('\0' == *p )
+		return;
+
+	/*
+	 * Only DEV_TYP_STOR devices can have a slice specification
+	 */
+	if (!(*type & DEV_TYP_STOR)) {
+		*type = -1;
+		*unit = -1;
+		return;
+	}
+
+	*slice = strtoul(p, &endp, 10);
+
+	/*
+	 * Malformed slice number
+	 */
+	if (p == endp) {
+		*type = -1;
+		*unit = -1;
+		*slice = 0;
+		return;
+	}
+
+	p = endp;
+	
+	/*
+	 * No partition specification
+	 */
+	if ('\0' == *p)
+		return;
+
+	/*
+	 * Device string is malformed beyond slice number
+	 */
+	if ('.' != *p) {
+		*type = -1;
+		*unit = -1;
+		*slice = 0;
+	}
+
+	p++;
+
+	/*
+	 * No partition specification
+	 */
+	if ('\0' == *p )
+		return;
+
+	*partition = strtol(p, &endp, 10);
+	p = endp;
+
+	/*
+	 * Full, valid device string
+	 */
+	if ('\0' == *endp)
+		return;
+
+	/*
+	 * Junk beyond partition number
+	 */
+	*type = -1;
+	*unit = -1;
+	*slice = 0;
+	*partition = -1;
+} 
+
 int
 main(void)
 {
 	struct api_signature *sig = NULL;
+	int load_type, load_unit, load_slice, load_partition;
 	int i;
+	int type_unit;
+	int open_result;
 	struct open_file f;
 
 	if (!api_search_sig(&sig))
@@ -166,6 +352,8 @@ main(void)
 	printf("(%s, %s)\n", bootprog_maker, bootprog_date);
 	meminfo();
 
+	get_load_device(&load_type, &load_unit, &load_slice, &load_partition);
+
 	/*
 	 * March through the device switch probing for things.
 	 */
@@ -182,11 +370,58 @@ main(void)
 		currdev.d_type = currdev.d_dev->dv_type;
 		currdev.d_unit = 0;
 
-		if (strncmp(devsw[i]->dv_name, "disk",
+		if (((-1 == load_type) || (load_type & DEV_TYP_STOR)) &&
+		    strncmp(devsw[i]->dv_name, "disk",
 		    strlen(devsw[i]->dv_name)) == 0) {
+
+			currdev.d_disk.slice = load_slice;
+			currdev.d_disk.partition = load_partition;
+
 			f.f_devdata = &currdev;
-			currdev.d_disk.slice = 0;
-			if (devsw[i]->dv_open(&f,&currdev) == 0)
+			open_result = -1;
+
+			if (-1 == load_type) {
+				printf("Searching all disks\n");
+				/*
+				 * Try each disk in succession until one
+				 * works.
+				 */
+				for (currdev.d_unit = 0; currdev.d_unit < UB_MAX_DEV;
+				     currdev.d_unit++) {
+					printf("Checking unit=%d slice=%d partition=%d\n",
+					       currdev.d_unit, currdev.d_disk.slice, currdev.d_disk.partition);
+					open_result = devsw[i]->dv_open(&f,&currdev);
+					if (0 == open_result)
+						break;
+				}
+			} else {
+				if (-1 == load_unit) {
+					printf("Searching all disks of given type\n");
+					/*
+					 * Try each disk of the given type in
+					 * succession until one works.
+					 */
+					for (type_unit = 0; type_unit < UB_MAX_DEV; type_unit++) {
+						currdev.d_unit = uboot_diskgetunit(load_type, type_unit);
+						if (-1 == currdev.d_unit)
+							break;
+
+						printf("Checking unit=%d slice=%d partition=%d\n",
+						       currdev.d_unit, currdev.d_disk.slice, currdev.d_disk.partition);
+						open_result = devsw[i]->dv_open(&f,&currdev);
+						if (0 == open_result)
+							break;
+					}
+				} else {
+					currdev.d_unit = uboot_diskgetunit(load_type, load_unit);
+
+					printf("Checking unit=%d slice=%d partition=%d\n",
+					       currdev.d_unit, currdev.d_disk.slice, currdev.d_disk.partition);
+					open_result = devsw[i]->dv_open(&f,&currdev);
+				}
+			}
+			
+			if (0 == open_result)
 				break;
 		}
 
